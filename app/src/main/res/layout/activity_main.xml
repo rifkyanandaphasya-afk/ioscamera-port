@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#000000">
+
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="56dp"
+            android:gravity="center_vertical" android:paddingHorizontal="20dp">
+            <TextView android:id="@+id/btnFlash" android:layout_width="44dp" android:layout_height="44dp"
+                android:gravity="center" android:text="⚡" android:textSize="22sp" android:textColor="#FFFFFF" />
+            <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+            <TextView android:id="@+id/txtRec" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="00:00" android:textColor="#FF3B30" android:textSize="16sp"
+                android:textStyle="bold" android:visibility="gone" />
+            <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+            <TextView android:id="@+id/btnTimer" android:layout_width="44dp" android:layout_height="44dp"
+                android:gravity="center" android:text="⏱" android:textSize="22sp" android:textColor="#FFFFFF" />
+            <TextView android:id="@+id/btnGrid" android:layout_width="44dp" android:layout_height="44dp"
+                android:gravity="center" android:text="▦" android:textSize="22sp" android:textColor="#FFFFFF" />
+        </LinearLayout>
+
+        <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+            <androidx.camera.view.PreviewView
+                android:id="@+id/viewFinder"
+                android:layout_width="match_parent" android:layout_height="match_parent"
+                app:scaleType="fitCenter" />
+            <com.example.ioscamera.GridView
+                android:id="@+id/gridView"
+                android:layout_width="match_parent" android:layout_height="match_parent"
+                android:visibility="gone" />
+            <TextView android:id="@+id/txtCountdown" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_gravity="center" android:textColor="#FFFFFF" android:textSize="96sp"
+                android:visibility="gone" />
+            <View android:id="@+id/focusRing" android:layout_width="72dp" android:layout_height="72dp"
+                android:background="@drawable/shutter_ring" android:visibility="gone" />
+            <LinearLayout android:id="@+id/zoomBar" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal" android:layout_marginBottom="12dp"
+                android:orientation="horizontal">
+                <TextView android:id="@+id/z05" style="@style/ZoomBtn" android:text=".5" />
+                <TextView android:id="@+id/z1" style="@style/ZoomBtn" android:text="1x" />
+                <TextView android:id="@+id/z2" style="@style/ZoomBtn" android:text="2" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="44dp"
+            android:gravity="center" android:orientation="horizontal">
+            <TextView android:id="@+id/mVideo" style="@style/ModeBtn" android:text="VIDEO" />
+            <TextView android:id="@+id/mPhoto" style="@style/ModeBtn" android:text="FOTO" />
+            <TextView android:id="@+id/mPortrait" style="@style/ModeBtn" android:text="POTRET" />
+            <TextView android:id="@+id/mSquare" style="@style/ModeBtn" android:text="PERSEGI" />
+        </LinearLayout>
+
+        <FrameLayout android:layout_width="match_parent" android:layout_height="120dp">
+            <ImageView android:id="@+id/btnGallery" android:layout_width="52dp" android:layout_height="52dp"
+                android:layout_gravity="center_vertical|start" android:layout_marginStart="36dp"
+                android:background="@drawable/thumb_bg" android:scaleType="centerCrop" />
+            <FrameLayout android:layout_width="78dp" android:layout_height="78dp" android:layout_gravity="center">
+                <View android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:background="@drawable/shutter_ring" />
+                <View android:id="@+id/shutterInner" android:layout_width="62dp" android:layout_height="62dp"
+                    android:layout_gravity="center" android:background="@drawable/shutter_photo" />
+                <View android:id="@+id/shutterHit" android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:clickable="true" android:focusable="true" />
+            </FrameLayout>
+            <TextView android:id="@+id/btnFlip" android:layout_width="52dp" android:layout_height="52dp"
+                android:layout_gravity="center_vertical|end" android:layout_marginEnd="36dp"
+                android:background="@drawable/zoom_bg" android:gravity="center"
+                android:text="⟳" android:textSize="26sp" android:textColor="#FFFFFF" />
+        </FrameLayout>
+    </LinearLayout>
+</FrameLayout>
