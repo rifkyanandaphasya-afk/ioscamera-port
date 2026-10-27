@@ -260,7 +260,10 @@ class MainActivity : AppCompatActivity() {
             .setAspectRatioStrategy(AspectRatioStrategy(tar, AspectRatioStrategy.FALLBACK_RULE_AUTO))
         if (high) {
             bld.setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
-            bld.setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE)
+            try { // API ini hanya ada di CameraX baru; lewat refleksi supaya build tidak gagal
+                val c = ResolutionSelector::class.java.getField("PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE").getInt(null)
+                bld.javaClass.getMethod("setAllowedResolutionMode", Int::class.javaPrimitiveType).invoke(bld, c)
+            } catch (t: Throwable) { }
         }
         return bld.build()
     }

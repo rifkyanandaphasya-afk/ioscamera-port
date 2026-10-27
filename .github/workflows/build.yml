@@ -14,7 +14,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.7
-      - run: gradle assembleDebug --no-daemon
+      - name: Build
+        run: |
+          set +e
+          gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" != "0" ]; then
+            msg=$(grep -E "^e: |What went wrong|error:" -A3 build.log | head -40 | sed 's/$/%0A/' | tr -d '\n')
+            echo "::error title=Gradle error::$msg"
+          fi
+          exit $code
       - uses: actions/upload-artifact@v4
         with:
           name: IOSCamera-apk
