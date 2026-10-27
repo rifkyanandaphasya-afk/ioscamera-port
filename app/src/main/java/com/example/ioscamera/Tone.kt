@@ -1,41 +1,54 @@
 package com.example.ioscamera
 
-/** Tone ala iPhone: sedikit lebih hangat, saturasi +12%, kontras +4%. */
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.pow
+
+/**
+ * Tone ala iPhone: bayangan sedikit terangkat, kontras lembut (S-curve),
+ * highlight tidak pecah, warna "vibrant" (warna kulit dilindungi), sedikit hangat.
+ */
 object Tone {
-    private const val C = 1.04f
-    private const val S = 1.12f
-    private val W = floatArrayOf(1.015f, 1.0f, 0.985f)
-    private const val OFF = 0.5f * (1f - C)
-
-    private fun m(): Array<FloatArray> {
-        val lr = 0.2126f; val lg = 0.7152f; val lb = 0.0722f
-        val sat = arrayOf(
-            floatArrayOf(lr * (1 - S) + S, lg * (1 - S), lb * (1 - S)),
-            floatArrayOf(lr * (1 - S), lg * (1 - S) + S, lb * (1 - S)),
-            floatArrayOf(lr * (1 - S), lg * (1 - S), lb * (1 - S) + S)
-        )
-        return Array(3) { r -> FloatArray(3) { c -> C * W[r] * sat[r][c] } }
+    private fun raw(x: Float): Float {
+        var y = x.pow(0.94f)
+        val s = y * y * (3f - 2f * y)
+        y += 0.30f * (s - y)
+        if (y > 0.85f) {
+            val t = (y - 0.85f) / 0.15f
+            y = 0.85f + 0.15f * (t - 0.1f * t * t)
+        }
+        return y
     }
 
-    /** android.graphics.ColorMatrix (4x5, baris-utama, offset 0..255). */
-    fun photo(): FloatArray {
-        val m = m(); val o = OFF * 255f
-        return floatArrayOf(
-            m[0][0], m[0][1], m[0][2], 0f, o,
-            m[1][0], m[1][1], m[1][2], 0f, o,
-            m[2][0], m[2][1], m[2][2], 0f, o,
-            0f, 0f, 0f, 1f, 0f
-        )
+    private val white = raw(1f)
+    val curve = FloatArray(256) { i -> (raw(i / 255f) / white).coerceIn(0f, 1f) }
+
+    private fun c8(v: Float): Int {
+        val i = (v * 255f + 0.5f).toInt()
+        return if (i < 0) 0 else if (i > 255) 255 else i
     }
 
-    /** Media3 RgbMatrix (4x4, kolom-utama). */
-    fun video(): FloatArray {
-        val m = m()
-        return floatArrayOf(
-            m[0][0], m[1][0], m[2][0], 0f,
-            m[0][1], m[1][1], m[2][1], 0f,
-            m[0][2], m[1][2], m[2][2], 0f,
-            OFF, OFF, OFF, 1f
-        )
+    /** r,g,b (0..255) -> ARGB setelah kurva + vibrance + hangat. */
+    fun toneRgb(ri: Int, gi: Int, bi: Int): Int {
+        var r = curve[ri]; var g = curve[gi]; var b = curve[bi]
+        val mx = max(r, max(g, b)); val mn = min(r, min(g, b))
+        val sat = if (mx > 1e-4f) (mx - mn) / mx else 0f
+        var boost = 0.20f * (1f - sat) + 0.05f
+        if (r >= g && g >= b && sat in 0.12f..0.65f) boost *= 0.45f // lindungi warna kulit
+        val l = 0.2126f * r + 0.7152f * g + 0.0722f * b
+        r = l + (r - l) * (1f + boost)
+        g = l + (g - l) * (1f + boost)
+        b = l + (b - l) * (1f + boost)
+        r *= 1.012f; b *= 0.988f
+        return (0xFF shl 24) or (c8(r) shl 16) or (c8(g) shl 8) or c8(b)
+    }
+
+    /** LUT 3D untuk video (Media3 SingleColorLut), indeks [r][g][b]. */
+    fun cube(n: Int = 33): Array<Array<IntArray>> = Array(n) { r ->
+        Array(n) { g ->
+            IntArray(n) { b ->
+                toneRgb(r * 255 / (n - 1), g * 255 / (n - 1), b * 255 / (n - 1))
+            }
+        }
     }
 }

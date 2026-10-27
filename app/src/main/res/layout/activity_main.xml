@@ -9,15 +9,23 @@
         android:orientation="vertical">
 
         <LinearLayout
-            android:layout_width="match_parent" android:layout_height="52dp"
+            android:layout_width="match_parent" android:layout_height="44dp"
             android:gravity="center_vertical" android:paddingHorizontal="8dp">
             <TextView android:id="@+id/btnFlash" style="@style/TopBtn" android:text="⚡" android:textSize="20sp" />
             <TextView android:id="@+id/btnLive" style="@style/TopBtn" android:text="LIVE" />
-            <TextView android:id="@+id/btnRes" style="@style/TopBtn" android:text="4:3" />
+            <TextView android:id="@+id/btnAi" style="@style/TopBtn" android:text="AI" />
             <TextView android:id="@+id/btnTone" style="@style/TopBtn" android:text="TONE" />
             <TextView android:id="@+id/btnStab" style="@style/TopBtn" android:text="STAB" />
             <TextView android:id="@+id/btnTimer" style="@style/TopBtn" android:text="⏱" android:textSize="20sp" />
             <TextView android:id="@+id/btnGrid" style="@style/TopBtn" android:text="▦" android:textSize="20sp" />
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="34dp"
+            android:gravity="center_vertical" android:paddingHorizontal="8dp">
+            <TextView android:id="@+id/btnRes" style="@style/TopBtn" android:text="4:3" />
+            <TextView android:id="@+id/btnMax" style="@style/TopBtn" android:text="MAX" />
+            <TextView android:id="@+id/btnSnd" style="@style/TopBtn" android:text="SUARA" />
+            <TextView android:id="@+id/btnInfo" style="@style/TopBtn" android:text="INFO" />
         </LinearLayout>
 
         <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
@@ -37,17 +45,14 @@
                 android:layout_gravity="center" android:textColor="#FFFFFF" android:textSize="96sp"
                 android:visibility="gone" />
             <TextView android:id="@+id/txtBusy" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_gravity="center" android:background="#99000000" android:padding="14dp"
-                android:textColor="#FFFFFF" android:textSize="14sp" android:visibility="gone" />
+                android:layout_gravity="top|center_horizontal" android:layout_marginTop="40dp"
+                android:background="#99000000" android:padding="10dp"
+                android:textColor="#FFFFFF" android:textSize="13sp" android:visibility="gone" />
             <View android:id="@+id/focusRing" android:layout_width="72dp" android:layout_height="72dp"
                 android:background="@drawable/shutter_ring" android:visibility="gone" />
             <LinearLayout android:id="@+id/zoomBar" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_gravity="bottom|center_horizontal" android:layout_marginBottom="12dp"
-                android:orientation="horizontal">
-                <TextView android:id="@+id/z05" style="@style/ZoomBtn" android:text=".5" />
-                <TextView android:id="@+id/z1" style="@style/ZoomBtn" android:text="1x" />
-                <TextView android:id="@+id/z2" style="@style/ZoomBtn" android:text="2" />
-            </LinearLayout>
+                android:orientation="horizontal" />
         </FrameLayout>
 
         <LinearLayout
@@ -58,7 +63,7 @@
             <TextView android:id="@+id/mPortrait" style="@style/ModeBtn" android:text="POTRET" />
         </LinearLayout>
 
-        <FrameLayout android:layout_width="match_parent" android:layout_height="120dp">
+        <FrameLayout android:layout_width="match_parent" android:layout_height="110dp">
             <ImageView android:id="@+id/btnGallery" android:layout_width="52dp" android:layout_height="52dp"
                 android:layout_gravity="center_vertical|start" android:layout_marginStart="36dp"
                 android:background="@drawable/thumb_bg" android:scaleType="centerCrop" />
