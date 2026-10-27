@@ -3,9 +3,9 @@
     <uses-feature android:name="android.hardware.camera.any" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <application
         android:label="Kamera"
+        android:largeHeap="true"
         android:theme="@style/Theme.IOSCamera"
         android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true"

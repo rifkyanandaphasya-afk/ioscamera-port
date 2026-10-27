@@ -9,19 +9,15 @@
         android:orientation="vertical">
 
         <LinearLayout
-            android:layout_width="match_parent" android:layout_height="56dp"
-            android:gravity="center_vertical" android:paddingHorizontal="20dp">
-            <TextView android:id="@+id/btnFlash" android:layout_width="44dp" android:layout_height="44dp"
-                android:gravity="center" android:text="⚡" android:textSize="22sp" android:textColor="#FFFFFF" />
-            <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
-            <TextView android:id="@+id/txtRec" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="00:00" android:textColor="#FF3B30" android:textSize="16sp"
-                android:textStyle="bold" android:visibility="gone" />
-            <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
-            <TextView android:id="@+id/btnTimer" android:layout_width="44dp" android:layout_height="44dp"
-                android:gravity="center" android:text="⏱" android:textSize="22sp" android:textColor="#FFFFFF" />
-            <TextView android:id="@+id/btnGrid" android:layout_width="44dp" android:layout_height="44dp"
-                android:gravity="center" android:text="▦" android:textSize="22sp" android:textColor="#FFFFFF" />
+            android:layout_width="match_parent" android:layout_height="52dp"
+            android:gravity="center_vertical" android:paddingHorizontal="8dp">
+            <TextView android:id="@+id/btnFlash" style="@style/TopBtn" android:text="⚡" android:textSize="20sp" />
+            <TextView android:id="@+id/btnLive" style="@style/TopBtn" android:text="LIVE" />
+            <TextView android:id="@+id/btnRes" style="@style/TopBtn" android:text="4:3" />
+            <TextView android:id="@+id/btnTone" style="@style/TopBtn" android:text="TONE" />
+            <TextView android:id="@+id/btnStab" style="@style/TopBtn" android:text="STAB" />
+            <TextView android:id="@+id/btnTimer" style="@style/TopBtn" android:text="⏱" android:textSize="20sp" />
+            <TextView android:id="@+id/btnGrid" style="@style/TopBtn" android:text="▦" android:textSize="20sp" />
         </LinearLayout>
 
         <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
@@ -33,9 +29,16 @@
                 android:id="@+id/gridView"
                 android:layout_width="match_parent" android:layout_height="match_parent"
                 android:visibility="gone" />
+            <TextView android:id="@+id/txtRec" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_gravity="top|center_horizontal" android:layout_marginTop="8dp"
+                android:text="00:00" android:textColor="#FF3B30" android:textSize="16sp"
+                android:textStyle="bold" android:visibility="gone" />
             <TextView android:id="@+id/txtCountdown" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_gravity="center" android:textColor="#FFFFFF" android:textSize="96sp"
                 android:visibility="gone" />
+            <TextView android:id="@+id/txtBusy" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_gravity="center" android:background="#99000000" android:padding="14dp"
+                android:textColor="#FFFFFF" android:textSize="14sp" android:visibility="gone" />
             <View android:id="@+id/focusRing" android:layout_width="72dp" android:layout_height="72dp"
                 android:background="@drawable/shutter_ring" android:visibility="gone" />
             <LinearLayout android:id="@+id/zoomBar" android:layout_width="wrap_content" android:layout_height="wrap_content"
@@ -53,7 +56,6 @@
             <TextView android:id="@+id/mVideo" style="@style/ModeBtn" android:text="VIDEO" />
             <TextView android:id="@+id/mPhoto" style="@style/ModeBtn" android:text="FOTO" />
             <TextView android:id="@+id/mPortrait" style="@style/ModeBtn" android:text="POTRET" />
-            <TextView android:id="@+id/mSquare" style="@style/ModeBtn" android:text="PERSEGI" />
         </LinearLayout>
 
         <FrameLayout android:layout_width="match_parent" android:layout_height="120dp">
