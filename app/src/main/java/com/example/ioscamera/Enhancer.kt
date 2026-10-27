@@ -16,7 +16,7 @@ object Enhancer {
     private const val F = 32      // ukuran sel grid kontras lokal
     private const val BH = 64     // tinggi pita proses
 
-    fun process(f: File, tone: Boolean, enhance: Boolean): Boolean {
+    fun process(f: File, tone: Boolean, enhance: Boolean, strength: Float = 1f): Boolean {
         if (!tone && !enhance) return false
         val bo = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(f.path, bo)
@@ -80,7 +80,7 @@ object Enhancer {
                         val lb = top * (1f - ty) + bot * ty             // kecerahan lokal 0..255
                         val yn = yc / 255f
                         val wgt = 4f * yn * (1f - yn)                   // fokus ke nada tengah
-                        val delta = 0.55f * d + 0.22f * (yc - lb) * wgt
+                        val delta = 0.55f * strength * d + 0.22f * strength * (yc - lb) * wgt
                         var gain = if (yc > 6) ((yc + delta) / yc).coerceIn(0.75f, 1.35f) else 1f
                         gain *= 1f + 0.12f * (max(0f, 110f - lb) / 110f) // angkat bayangan
                         var r = (((q shr 16) and 255) * gain + 0.5f).toInt()
@@ -119,8 +119,8 @@ object Enhancer {
                     val p = px[ry * w + x]
                     val l = (((p shr 16) and 255) * 54 + ((p shr 8) and 255) * 183 + (p and 255) * 19) shr 8
                     val i = cy * gw + x / F
-                          sum[i] = sum[i] + l.toFloat()
-cnt[i] = cnt[i] + 1
+                    sum[i] = sum[i] + l.toFloat()
+                    cnt[i] = cnt[i] + 1
                     x += 2
                 }
                 ry += 2
@@ -143,7 +143,7 @@ cnt[i] = cnt[i] + 1
         return g
     }
 
-    private fun copyExif(src: File, dst: File) {
+    fun copyExif(src: File, dst: File) {
         try {
             val a = ExifInterface(src.path); val b = ExifInterface(dst.path)
             val tags = listOf(

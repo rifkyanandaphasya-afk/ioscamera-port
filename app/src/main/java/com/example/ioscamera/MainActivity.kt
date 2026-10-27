@@ -4,7 +4,9 @@ import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
 import android.graphics.Color
 import android.graphics.Typeface
 import android.hardware.camera2.CameraCharacteristics
@@ -37,6 +39,7 @@ import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
+import androidx.camera.core.CameraFilter
 import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -101,7 +104,10 @@ class MainActivity : AppCompatActivity() {
     private var torchOn = false
     private var timerSec = 0
     private var live = false
-    private var toneOn = false
+    private var toneLevel = 0
+    private var burstOn = false
+    private var esrLevel = 0   // 0 mati, 1 cepat (~1,5 MP), 2 tinggi (~3 MP)
+    private val esr by lazy { AiUpscaler(this) }
     private var stabOn = false
     private var aiOn = false
     private var maxRes = false
@@ -117,6 +123,7 @@ class MainActivity : AppCompatActivity() {
         VOpt("4K·60", Quality.UHD, 60, 70)
     )
     private var vIdx = 1
+    private var vOpts: List<VOpt> = allVOpts
 
     // hasil deteksi hardware
     private var oisOk = false
@@ -128,6 +135,15 @@ class MainActivity : AppCompatActivity() {
     private var qualText = "-"
     private var extText = "-"
     private var fps4k = "-"
+    private var rawText = "-"
+    private var eisMode = 0
+    private var maxFps = 30
+    private val sepIds = mutableMapOf<Float, String>()   // lensa dengan ID kamera terpisah (UW/tele)
+    private var forcedCamId: String? = null
+    private var camFactor = 1f
+    private var pendingZoom: Float? = null
+    private var mainMin = 1f
+    private var mainMax = 1f
 
     private var zoomCur = 1f
     private var zoomTarget = 1f
@@ -172,8 +188,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun probe(info: CameraInfo?, base: CameraSelector) {
-        oisOk = false; eisOk = false; hq = emptyList()
-        lensRatios = emptyList(); lensText = "-"; fpsText = "-"; qualText = "-"; fps4k = "-"
+        oisOk = false; eisOk = false; eisMode = 0; hq = emptyList()
+        fpsText = "-"; qualText = "-"; fps4k = "-"; maxFps = 30; rawText = "-"
+        if (forcedCamId == null) { lensRatios = emptyList(); lensText = "-"; sepIds.clear() }
         val em = extensions
         extText = listOf("AUTO" to ExtensionMode.AUTO, "HDR" to ExtensionMode.HDR, "NIGHT" to ExtensionMode.NIGHT,
             "BOKEH" to ExtensionMode.BOKEH, "FACE" to ExtensionMode.FACE_RETOUCH)
@@ -184,14 +201,24 @@ class MainActivity : AppCompatActivity() {
             val c2 = Camera2CameraInfo.from(info)
             oisOk = c2.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
                 ?.contains(CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON) == true
-            eisOk = c2.getCameraCharacteristic(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)
-                ?.contains(CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true
+            val sm = c2.getCameraCharacteristic(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)
+            eisMode = if (sm?.contains(CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true) 1
+                      else if (sm?.contains(2) == true) 2 else 0   // 2 = stabilisasi pratinjau (Android 13+)
+            eisOk = eisMode != 0
             val ranges = c2.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             fpsText = ranges?.joinToString { "${it.lower}-${it.upper}" } ?: "-"
-            qualText = QualitySelector.getSupportedQualities(info).joinToString { it.toString() }
-            val list = mutableListOf<Pair<CaptureRequest.Key<Int>, Int>>()
+            ranges?.forEach { if (it.upper > maxFps) maxFps = it.upper }
+            val sq = QualitySelector.getSupportedQualities(info)
+            qualText = sq.joinToString { it.toString().substringAfter("name=").substringBefore("}") }
+            val prev = vOpts.getOrNull(vIdx)?.label
+            var list = allVOpts.filter { it.q in sq && it.fps <= maxFps }
+            if (list.isEmpty()) list = listOf(allVOpts[1])
+            vOpts = list
+            vIdx = list.indexOfFirst { it.label == prev }.takeIf { it >= 0 }
+                ?: list.indexOfFirst { it.label == "FHD·30" }.takeIf { it >= 0 } ?: 0
+            val hl = mutableListOf<Pair<CaptureRequest.Key<Int>, Int>>()
             fun add(ch: CameraCharacteristics.Key<IntArray>, rq: CaptureRequest.Key<Int>, v: Int) {
-                if (c2.getCameraCharacteristic(ch)?.contains(v) == true) list.add(rq to v)
+                if (c2.getCameraCharacteristic(ch)?.contains(v) == true) hl.add(rq to v)
             }
             add(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES,
                 CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY)
@@ -203,13 +230,21 @@ class MainActivity : AppCompatActivity() {
                 CaptureRequest.HOT_PIXEL_MODE, CameraMetadata.HOT_PIXEL_MODE_HIGH_QUALITY)
             add(CameraCharacteristics.SHADING_AVAILABLE_MODES,
                 CaptureRequest.SHADING_MODE, CameraMetadata.SHADING_MODE_HIGH_QUALITY)
-            hq = list
+            hq = hl
             try {
                 val map = c2.getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                 val d = map?.getOutputMinFrameDuration(MediaRecorder::class.java, Size(3840, 2160)) ?: 0L
                 fps4k = if (d > 0) "${(1e9 / d).roundToInt()} fps" else "tidak dilaporkan"
             } catch (e: Exception) { }
-            detectLenses(c2.cameraId)
+            try {
+                val caps = c2.getCameraCharacteristic(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                val capRaw = caps?.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_RAW) == true
+                val rm = c2.getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                val rs = rm?.getOutputSizes(ImageFormat.RAW_SENSOR)?.maxByOrNull { it.width * it.height }
+                rawText = if (capRaw && rs != null) "ya, ${rs.width}x${rs.height}"
+                          else "tidak dibuka untuk aplikasi pihak ketiga"
+            } catch (e: Exception) { rawText = "tidak terdeteksi" }
+            if (forcedCamId == null) detectLenses(c2.cameraId)
         } catch (e: Exception) { /* pakai bawaan */ }
     }
 
@@ -219,26 +254,38 @@ class MainActivity : AppCompatActivity() {
         return f * 43.27f / sqrt(s.width * s.width + s.height * s.height)
     }
 
-    /** Deteksi lensa optik (UW / utama / tele) lewat focal length fisik. */
+    /** Deteksi lensa optik (UW / utama / tele) lewat focal length; catat lensa ber-ID terpisah. */
     private fun detectLenses(logicalId: String) {
         if (lens != CameraSelector.LENS_FACING_BACK) return
         val cm = getSystemService(CAMERA_SERVICE) as CameraManager
         val lc = cm.getCameraCharacteristics(logicalId)
-        var ids = lc.physicalCameraIds.toList()
-        if (ids.isEmpty()) ids = cm.cameraIdList.filter {
+        val phys = lc.physicalCameraIds.toList()
+        val src = if (phys.isNotEmpty()) phys else cm.cameraIdList.filter {
             try { cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK }
             catch (e: Exception) { false }
         }
-        val eqs = ids.mapNotNull { try { equiv(cm.getCameraCharacteristics(it)) } catch (e: Exception) { null } }
-            .map { it.roundToInt().toFloat() }.distinct().sorted()
-        if (eqs.isEmpty()) return
-        val main = eqs.filter { it in 18f..40f }.minByOrNull { kotlin.math.abs(it - 26f) } ?: equiv(lc) ?: eqs.first()
-        val rs = eqs.map { e ->
-            val r = e / main
-            if (r < 0.95f) ((r * 2f).roundToInt() / 2f).coerceAtLeast(0.5f) else r.roundToInt().toFloat()
+        val entries = mutableListOf<Pair<String, Float>>()
+        for (id in src) {
+            try { equiv(cm.getCameraCharacteristics(id))?.let { entries.add(id to it) } } catch (e: Exception) { }
         }
+        if (entries.isEmpty()) return
+        val eqs = entries.map { it.second.roundToInt().toFloat() }.distinct().sorted()
+        val main = equiv(lc)?.roundToInt()?.toFloat()
+            ?: eqs.filter { it in 18f..40f }.minByOrNull { kotlin.math.abs(it - 26f) } ?: eqs.first()
+        fun lab(e: Float): Float {
+            val r = e / main
+            return if (r < 0.95f) ((r * 2f).roundToInt() / 2f).coerceAtLeast(0.5f) else r.roundToInt().toFloat()
+        }
+        val rs = eqs.map { lab(it) }
         lensRatios = rs.distinct().sorted()
         lensText = eqs.zip(rs).joinToString(" · ") { "${it.first.roundToInt()}mm→${fmt(it.second)}x" }
+        if (phys.isEmpty()) {
+            for ((id, e) in entries) {
+                if (id == logicalId) continue
+                val k = lab(e.roundToInt().toFloat())
+                if (k != 1f) sepIds[k] = id
+            }
+        }
     }
 
     // ------------------------------------------------------------ bind
@@ -248,7 +295,7 @@ class MainActivity : AppCompatActivity() {
         if (oisOk) ext.setCaptureRequestOption(
             CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON)
         if (eis && eisOk) ext.setCaptureRequestOption(
-            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, eisMode)
     }
 
     private fun <T> applyHq(ext: Camera2Interop.Extender<T>) {
@@ -272,8 +319,21 @@ class MainActivity : AppCompatActivity() {
         val p = provider ?: return
         b.viewFinder.removeCallbacks(zoomTick); zooming = false; zoomBuilt = false
         p.unbindAll()
-        val base = CameraSelector.Builder().requireLensFacing(lens).build()
+        val bb = CameraSelector.Builder().requireLensFacing(lens)
+        val fid = forcedCamId
+        if (fid != null && lens == CameraSelector.LENS_FACING_BACK) {
+            bb.addCameraFilter(CameraFilter { list ->
+                list.filter { try { Camera2CameraInfo.from(it).cameraId == fid } catch (e: Exception) { false } }
+            })
+        }
+        val base = bb.build()
         probe(base.filter(p.availableCameraInfos).firstOrNull(), base)
+        if (sepIds.isNotEmpty()) {
+            val ok = p.availableCameraInfos.mapNotNull {
+                try { Camera2CameraInfo.from(it).cameraId } catch (e: Exception) { null }
+            }.toSet()
+            sepIds.entries.removeAll { it.value !in ok }
+        }
 
         var selector = base
         var extUsed = false
@@ -282,7 +342,7 @@ class MainActivity : AppCompatActivity() {
             if (em != null && em.isExtensionAvailable(base, ExtensionMode.BOKEH)) {
                 selector = em.getExtensionEnabledCameraSelector(base, ExtensionMode.BOKEH); extUsed = true
             } else toast("Mode potret (bokeh) tidak didukung perangkat ini")
-        } else if (mode == Mode.PHOTO && aiOn && !live && !extBlocked) {
+        } else if (mode == Mode.PHOTO && aiOn && !live && !extBlocked && forcedCamId == null && !burstOn) {
             if (em != null) {
                 val m = listOf(ExtensionMode.AUTO, ExtensionMode.HDR).firstOrNull { em.isExtensionAvailable(base, it) }
                 if (m != null) { selector = em.getExtensionEnabledCameraSelector(base, m); extUsed = true }
@@ -306,7 +366,7 @@ class MainActivity : AppCompatActivity() {
         if (mode != Mode.VIDEO) {
             val high = maxRes && !useLive && !extUsed
             val ib = ImageCapture.Builder().setResolutionSelector(resSel(tar, high)).setJpegQuality(97)
-                .setCaptureMode(if (useLive) ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+                .setCaptureMode(if (useLive || burstOn) ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
                                 else ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                 .setFlashMode(flashMode)
             if (!extUsed) {
@@ -316,7 +376,7 @@ class MainActivity : AppCompatActivity() {
             imageCapture = ib.build()
             gb.addUseCase(imageCapture!!)
         }
-        val opt = if (mode == Mode.VIDEO) allVOpts[vIdx] else allVOpts[0]
+        val opt = if (mode == Mode.VIDEO) vOpts[vIdx] else allVOpts[0]
         if (mode == Mode.VIDEO || useLive) {
             val rec = Recorder.Builder()
                 .setQualitySelector(QualitySelector.from(opt.q, FallbackStrategy.lowerQualityOrHigherThan(opt.q)))
@@ -331,11 +391,14 @@ class MainActivity : AppCompatActivity() {
         try {
             camera = p.bindToLifecycle(this, selector, gb.build())
         } catch (e: Exception) {
-            if (extUsed && mode == Mode.PHOTO) {
+            if (forcedCamId != null) {
+                forcedCamId = null; camFactor = 1f; pendingZoom = null
+                toast("Lensa ini tidak bisa dibuka aplikasi, kembali ke kamera utama"); bind()
+            } else if (extUsed && mode == Mode.PHOTO) {
                 extBlocked = true; toast("Ekstensi HP gagal dipakai, pakai AI software"); bind()
             } else if (mode == Mode.VIDEO && opt.fps > 30) {
                 toast("${opt.label} tidak didukung kamera ini, pakai 30 fps")
-                vIdx = allVOpts.indexOfFirst { it.q == opt.q && it.fps == 30 }.takeIf { it >= 0 } ?: 1
+                vIdx = vOpts.indexOfFirst { it.q == opt.q && it.fps == 30 }.takeIf { it >= 0 } ?: 0
                 bind()
             } else if (useLive) {
                 live = false; toast("Foto Live tidak didukung perangkat ini"); bind()
@@ -346,7 +409,12 @@ class MainActivity : AppCompatActivity() {
         }
         camera?.cameraInfo?.zoomState?.observe(this) { z ->
             if (!zooming) { zoomCur = z.zoomRatio; zoomTarget = zoomCur }
-            if (!zoomBuilt) { buildZoomButtons(z); zoomBuilt = true }
+            if (!zoomBuilt) {
+                zoomBuilt = true
+                if (forcedCamId == null) { mainMin = z.minZoomRatio; mainMax = z.maxZoomRatio }
+                buildZoomButtons(z)
+                pendingZoom?.let { pendingZoom = null; zoomTo(it) }
+            }
             updateZoomButtons(z)
         }
         torchOn = false
@@ -363,20 +431,28 @@ class MainActivity : AppCompatActivity() {
             if (recording != null) return@setOnClickListener
             lens = if (lens == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT
             else CameraSelector.LENS_FACING_BACK
+            forcedCamId = null; camFactor = 1f; pendingZoom = null
             bind()
         }
         b.btnRes.setOnClickListener {
             if (recording != null) return@setOnClickListener
-            if (mode == Mode.VIDEO) vIdx = (vIdx + 1) % allVOpts.size else rIdx = (rIdx + 1) % ratios.size
+            if (mode == Mode.VIDEO) vIdx = (vIdx + 1) % vOpts.size else rIdx = (rIdx + 1) % ratios.size
             bind()
         }
         b.btnMax.setOnClickListener {
             maxRes = !maxRes; bind()
             toast(if (maxRes) "Resolusi foto MAX (lihat INFO untuk ukuran)" else "Resolusi standar")
         }
+        b.btnEsr.setOnClickListener {
+            if (!esr.available()) { toast("Model ESR belum ada di app/src/main/assets"); return@setOnClickListener }
+            esrLevel = (esrLevel + 1) % 3; updateUi()
+            toast(arrayOf("ESR mati",
+                "ESR CEPAT: semua zoom, ±1 menit per foto",
+                "ESR TINGGI: lebih tajam, ±2–4 menit per foto")[esrLevel])
+        }
         b.btnLive.setOnClickListener {
             if (mode != Mode.PHOTO) { toast("Foto Live hanya di mode Foto"); return@setOnClickListener }
-            live = !live; bind()
+            live = !live; if (live) burstOn = false; bind()
             toast(if (live) "Live aktif (AI bawaan HP & MAX dinonaktifkan)" else "Live mati")
         }
         b.btnAi.setOnClickListener {
@@ -384,8 +460,14 @@ class MainActivity : AppCompatActivity() {
             toast(if (aiOn) "AI aktif: HDR/Auto bawaan HP bila ada + AI software" else "AI mati")
         }
         b.btnTone.setOnClickListener {
-            toneOn = !toneOn; updateUi()
-            toast(if (toneOn) "Tone iPhone aktif (diterapkan ke hasil simpan)" else "Tone standar")
+            toneLevel = (toneLevel + 1) % 3; updateUi()
+            toast(arrayOf("Tone standar", "Tone iPhone (diterapkan ke hasil simpan)",
+                "Tone VIVID: warna pekat & kontras tegas")[toneLevel])
+        }
+        b.btnBurst.setOnClickListener {
+            if (mode != Mode.PHOTO) { toast("HDR+ hanya di mode Foto"); return@setOnClickListener }
+            burstOn = !burstOn; if (burstOn) live = false; bind()
+            toast(if (burstOn) "HDR+ aktif: 6 foto digabung. Tahan HP diam ±2 detik" else "HDR+ mati")
         }
         b.btnStab.setOnClickListener {
             if (recording != null) return@setOnClickListener
@@ -443,11 +525,15 @@ class MainActivity : AppCompatActivity() {
         b.shutterInner.setBackgroundResource(if (mode == Mode.VIDEO) R.drawable.shutter_video else R.drawable.shutter_photo)
         b.btnFlash.setTextColor(
             if (mode != Mode.VIDEO && flashMode != ImageCapture.FLASH_MODE_OFF) Color.YELLOW else Color.WHITE)
-        b.btnRes.text = if (mode == Mode.VIDEO) allVOpts[vIdx].label else ratios[rIdx]
+        b.btnRes.text = if (mode == Mode.VIDEO) vOpts[vIdx].label else ratios[rIdx]
         b.btnLive.setTextColor(if (live && mode == Mode.PHOTO) Color.YELLOW else Color.WHITE)
         b.btnLive.alpha = if (mode == Mode.PHOTO) 1f else 0.4f
         b.btnAi.setTextColor(if (aiOn) Color.YELLOW else Color.WHITE)
-        b.btnTone.setTextColor(if (toneOn) Color.YELLOW else Color.WHITE)
+        b.btnTone.text = arrayOf("TONE", "iOS", "VIVID")[toneLevel]
+        b.btnTone.setTextColor(if (toneLevel > 0) Color.YELLOW else Color.WHITE)
+        b.btnBurst.setTextColor(if (burstOn) Color.YELLOW else Color.WHITE)
+        b.btnEsr.text = arrayOf("ESR", "ESR-C", "ESR-T")[esrLevel]
+        b.btnEsr.setTextColor(if (esrLevel > 0) Color.YELLOW else Color.WHITE)
         b.btnStab.setTextColor(if (stabOn) Color.YELLOW else Color.WHITE)
         b.btnMax.setTextColor(if (maxRes) Color.YELLOW else Color.WHITE)
         b.btnSnd.setTextColor(if (soundOn) Color.YELLOW else Color.WHITE)
@@ -470,10 +556,14 @@ class MainActivity : AppCompatActivity() {
         }
         sb.append("FPS (AE): ").append(fpsText).append('\n')
         sb.append("Maks fps 4K (encoder): ").append(fps4k).append('\n')
+        if (maxFps < 60) sb.append("60 fps: tidak dibuka HP untuk aplikasi pihak ketiga\n")
+        if (sepIds.isNotEmpty()) sb.append("Lensa ber-ID terpisah: ").append(sepIds.entries.joinToString { "${fmt(it.key)}x=ID${it.value}" }).append('\n')
         sb.append("Kualitas video: ").append(qualText).append('\n')
         sb.append("OIS: ").append(if (oisOk) "ya" else "tidak")
             .append("   EIS: ").append(if (eisOk) "ya" else "tidak").append('\n')
         sb.append("Mode HQ hardware: ").append(hq.size).append(" aktif\n")
+        sb.append("Model ESR: ").append(if (esr.available()) "ada" else "belum ada").append('\n')
+        sb.append("RAW (DNG): ").append(rawText).append('\n')
         sb.append("Ekstensi HP: ").append(extText)
         AlertDialog.Builder(this).setTitle("Info kamera").setMessage(sb.toString())
             .setPositiveButton("OK", null).show()
@@ -484,16 +574,30 @@ class MainActivity : AppCompatActivity() {
     private fun fmt(v: Float): String =
         if (v >= 10f) v.roundToInt().toString() else String.format(Locale.US, "%.1f", v).removeSuffix(".0")
 
+    private fun selectZoom(r: Float) {
+        val sep = sepIds[r]
+        val reachable = r >= mainMin * 0.95f && r <= mainMax
+        if (sep != null && !reachable) {
+            if (forcedCamId != sep) { forcedCamId = sep; camFactor = r; pendingZoom = 1f; bind() }
+            else zoomTo(1f)
+        } else if (forcedCamId != null) {
+            forcedCamId = null; camFactor = 1f; pendingZoom = r; bind()
+        } else zoomTo(r)
+    }
+
     private fun buildZoomButtons(z: ZoomState) {
         b.zoomBar.removeAllViews(); zoomBtns.clear()
         val set = sortedSetOf(1f)
         lensRatios.forEach { set.add(it) }
-        if (z.minZoomRatio <= 0.65f) set.add(0.5f)
-        if (z.maxZoomRatio >= 2f) set.add(2f)
-        if (z.maxZoomRatio >= 10f) set.add(10f)
-        if (z.maxZoomRatio >= 20f) set.add(minOf(floor(z.maxZoomRatio / 10f) * 10f, 30f))
+        if (lens == CameraSelector.LENS_FACING_BACK && mainMin <= 0.65f) set.add(0.5f)
+        if (mainMax >= 2f) set.add(2f)
+        if (mainMax >= 5f) set.add(5f)
+        if (mainMax >= 10f) set.add(10f)
+        val top = minOf(if (mainMax >= 20f) floor(mainMax / 10f) * 10f else floor(mainMax), 30f)
+        if (top >= 4f) set.add(top)
         for (r in set) {
-            if (r < z.minZoomRatio * 0.8f || r > z.maxZoomRatio) continue
+            val ok = (r >= mainMin * 0.8f && r <= mainMax) || sepIds.containsKey(r)
+            if (!ok) continue
             val tv = TextView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).also { it.setMargins(dp(3), 0, dp(3), 0) }
                 gravity = Gravity.CENTER
@@ -502,7 +606,7 @@ class MainActivity : AppCompatActivity() {
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(Color.WHITE)
                 text = fmt(r)
-                setOnClickListener { zoomTo(r) }
+                setOnClickListener { selectZoom(r) }
             }
             b.zoomBar.addView(tv)
             zoomBtns.add(r to tv)
@@ -510,7 +614,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateZoomButtons(z: ZoomState) {
-        val cur = z.zoomRatio
+        val cur = z.zoomRatio * camFactor
         var active = 0
         zoomBtns.forEachIndexed { i, (r, _) -> if (r <= cur * 1.03f) active = i }
         zoomBtns.forEachIndexed { i, (r, tv) ->
@@ -582,11 +686,13 @@ class MainActivity : AppCompatActivity() {
     private fun takePhoto() {
         val ic = imageCapture ?: return
         val photo = File(cacheDir, "p_${stamp()}.jpg")
+        val zShot = zoomCur * camFactor
         val vc = videoCapture
         val withClip = live && mode == Mode.PHOTO && vc != null
+        if (burstOn && mode == Mode.PHOTO && !withClip) { takeBurst(); return }
         var clip: File? = null
         var parts = if (withClip) 2 else 1
-        fun done() { if (--parts == 0) finishPhoto(photo, clip) }
+        fun done() { if (--parts == 0) finishPhoto(photo, clip, zShot) }
 
         play(MediaActionSound.SHUTTER_CLICK)
         if (withClip) {
@@ -612,16 +718,18 @@ class MainActivity : AppCompatActivity() {
         }, if (withClip) 250L else 0L)
     }
 
-    private fun finishPhoto(photo: File, clip: File?) {
+    private fun finishPhoto(photo: File, clip: File?, zShot: Float) {
         pendingJobs++; busy("Memproses foto…")
-        val tone = toneOn; val enh = aiOn
+        val lvl = toneLevel; val enh = aiOn; val esrL = esrLevel
         exec.execute {
             var dims = ""
             try {
                 val bo = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(photo.path, bo)
                 dims = "${bo.outWidth}x${bo.outHeight}"
-                if (tone || enh) try { Enhancer.process(photo, tone, enh) } catch (t: Throwable) { }
+                Tone.level = lvl
+                if (lvl > 0 || enh) try { Enhancer.process(photo, lvl > 0, enh) } catch (t: Throwable) { }
+                if (esrL > 0 && clip == null) try { applyEsr(photo, zShot, esrL) } catch (t: Throwable) { }
                 val s = stamp()
                 val uri: Uri?
                 if (clip != null) {
@@ -631,6 +739,97 @@ class MainActivity : AppCompatActivity() {
                     m.delete(); clip.delete()
                 } else uri = saveToGallery(photo, "IMG_$s.jpg", "image/jpeg", "Pictures/IOSCamera", false)
                 photo.delete()
+                if (uri != null) setThumb(uri)
+            } catch (t: Throwable) {
+                runOnUiThread { toast("Gagal menyimpan: ${t.message}") }
+            }
+            runOnUiThread {
+                pendingJobs--
+                if (pendingJobs == 0) busy(null)
+                toast("Foto tersimpan $dims")
+            }
+        }
+    }
+
+    /**
+     * ESR: perkecil foto ke anggaran piksel (1,5 MP cepat / 3 MP tinggi, atau ~1/zoom bila lebih kecil),
+     * perbesar 4x dengan Real-ESRGAN, kembalikan ke ukuran semula, lalu campur dengan foto asli
+     * supaya tekstur asli tidak hilang (hasil tidak terlalu "plastik").
+     */
+    private fun applyEsr(f: File, z: Float, level: Int): Boolean {
+        val bo = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.path, bo)
+        val w = bo.outWidth; val h = bo.outHeight
+        if (w <= 0 || w.toLong() * h > 60_000_000L) return false
+        val budget = if (level >= 2) 3_000_000.0 else 1_500_000.0
+        var fs = 1f / kotlin.math.max(1f, kotlin.math.min(z, 4f))
+        fs = kotlin.math.min(fs, sqrt(budget / (w.toDouble() * h)).toFloat())
+        val iw = (w * fs).toInt().coerceAtLeast(64); val ih = (h * fs).toInt().coerceAtLeast(64)
+        var ss = 1
+        while (ss * 2 <= (1f / fs).toInt()) ss *= 2
+        val dec = BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = ss }) ?: return false
+        val small = Bitmap.createScaledBitmap(dec, iw, ih, true)
+        if (small !== dec) dec.recycle()
+        val big = esr.upscale(small) { d, t -> runOnUiThread { busy("ESR $d/$t …") } }
+        small.recycle()
+        if (big == null) { runOnUiThread { toast("ESR gagal: ${esr.error}") }; return false }
+        val fin = Bitmap.createScaledBitmap(big, w, h, true)
+        if (fin !== big) big.recycle()
+        val orig = BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inMutable = true })
+        val outBmp = if (orig != null) {
+            val alpha = if (z < 1.9f) 175 else 220
+            android.graphics.Canvas(orig).drawBitmap(fin, 0f, 0f, android.graphics.Paint().apply { this.alpha = alpha })
+            fin.recycle(); orig
+        } else fin
+        val tmp = File(f.path + ".e")
+        tmp.outputStream().use { outBmp.compress(Bitmap.CompressFormat.JPEG, 96, it) }
+        outBmp.recycle()
+        Enhancer.copyExif(f, tmp)
+        f.delete(); tmp.renameTo(f)
+        return true
+    }
+
+    private fun takeBurst() {
+        val ic = imageCapture ?: return
+        val n = 6
+        val zShot = zoomCur * camFactor
+        val files = ArrayList<File>()
+        play(MediaActionSound.SHUTTER_CLICK)
+        busy("Tahan HP diam…  0/$n")
+        fun next() {
+            if (files.size >= n) { finishBurst(files, zShot); return }
+            val f = File(cacheDir, "b_${stamp()}_${files.size}.jpg")
+            ic.takePicture(ImageCapture.OutputFileOptions.Builder(f).build(),
+                ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
+                    override fun onImageSaved(r: ImageCapture.OutputFileResults) {
+                        files.add(f); busy("Tahan HP diam…  ${files.size}/$n"); next()
+                    }
+                    override fun onError(e: ImageCaptureException) {
+                        toast("Burst terhenti: ${e.message}")
+                        if (files.size >= 2) finishBurst(files, zShot) else busy(null)
+                    }
+                })
+        }
+        next()
+    }
+
+    private fun finishBurst(files: List<File>, zShot: Float) {
+        pendingJobs++; busy("Menggabungkan foto…")
+        val lvl = toneLevel; val esrL = esrLevel
+        exec.execute {
+            var dims = ""
+            try {
+                val merged = File(cacheDir, "mg_${stamp()}.jpg")
+                val ok = try { Stacker.merge(files, merged) } catch (t: Throwable) { false }
+                val src = if (ok) merged else files[0]
+                val bo = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(src.path, bo)
+                dims = "${bo.outWidth}x${bo.outHeight}" + if (ok) " (HDR+ ${files.size} frame)" else " (gabung gagal)"
+                Tone.level = lvl
+                try { Enhancer.process(src, lvl > 0, true, if (ok) 1.6f else 1f) } catch (t: Throwable) { }
+                if (esrL > 0) try { applyEsr(src, zShot, esrL) } catch (t: Throwable) { }
+                val uri = saveToGallery(src, "IMG_${stamp()}.jpg", "image/jpeg", "Pictures/IOSCamera", false)
+                files.forEach { it.delete() }; merged.delete()
                 if (uri != null) setThumb(uri)
             } catch (t: Throwable) {
                 runOnUiThread { toast("Gagal menyimpan: ${t.message}") }
@@ -717,7 +916,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun afterVideo(f: File) {
-        if (!toneOn) { saveVideo(f, null); return }
+        if (toneLevel == 0) { saveVideo(f, null); return }
+        Tone.level = toneLevel
         busy("Menerapkan tone iPhone…\n(video 4K bisa lama)")
         try {
             val out = File(cacheDir, "g_${stamp()}.mp4")

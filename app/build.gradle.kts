@@ -9,8 +9,8 @@ android {
         applicationId = "com.example.ioscamera"
         minSdk = 29
         targetSdk = 34
-        versionCode = 3
-        versionName = "3.0"
+        versionCode = 7
+        versionName = "3.4"
     }
     buildFeatures { viewBinding = true }
     compileOptions {
@@ -35,4 +35,5 @@ dependencies {
     implementation("androidx.media3:media3-common:$media3")
     implementation("androidx.media3:media3-effect:$media3")
     implementation("androidx.media3:media3-transformer:$media3")
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
 }
