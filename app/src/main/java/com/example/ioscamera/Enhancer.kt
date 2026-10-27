@@ -120,7 +120,7 @@ object Enhancer {
                     val l = (((p shr 16) and 255) * 54 + ((p shr 8) and 255) * 183 + (p and 255) * 19) shr 8
                     val i = cy * gw + x / F
                           sum[i] = sum[i] + l.toFloat()
-                           cnt[i] = cnt[i] + 1
+cnt[i] = cnt[i] + 1
                     x += 2
                 }
                 ry += 2
