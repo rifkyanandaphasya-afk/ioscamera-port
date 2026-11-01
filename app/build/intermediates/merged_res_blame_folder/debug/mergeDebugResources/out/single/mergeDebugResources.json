@@ -1,0 +1,50 @@
+[
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_thumb_bg.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/thumb_bg.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_shutter_video.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/shutter_video.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_chip_bg.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/chip_bg.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_rec_bg.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/rec_bg.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_pill_bg.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/pill_bg.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_scrim_top.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/scrim_top.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_scrim_bottom.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/scrim_bottom.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/layout_activity_main.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_panel_bg.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/panel_bg.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_zoom_bg.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/zoom_bg.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_shutter_photo.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/shutter_photo.xml"
+    },
+    {
+        "merged": "com.example.ioscamera.app-debug-30:/drawable_shutter_ring.xml.flat",
+        "source": "com.example.ioscamera.app-main-32:/drawable/shutter_ring.xml"
+    }
+]

@@ -457,7 +457,9 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             val st = camera?.cameraInfo?.exposureState
-            if (st != null && st.isExposureAdjustmentSupported) {
+            if (st != null && 
+            (st.exposureCompensationRange.lower !=
+            st.exposureCompensationRange.upper)) {
                 val rg = st.exposureCompensationRange
                 val step = st.exposureCompensationStep.toFloat()
                 val idx = if (nightOn && !nightExt && mode == Mode.PHOTO && step > 0f)
