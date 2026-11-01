@@ -4,81 +4,117 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="#000000">
 
-    <LinearLayout
+    <androidx.camera.view.PreviewView
+        android:id="@+id/viewFinder"
         android:layout_width="match_parent" android:layout_height="match_parent"
-        android:orientation="vertical">
+        app:scaleType="fitStart" />
+    <ImageView android:id="@+id/freeze"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="fitXY" android:visibility="gone" />
+    <com.example.ioscamera.GridView
+        android:id="@+id/gridView"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_gravity="top" android:visibility="gone" />
 
-        <LinearLayout
-            android:layout_width="match_parent" android:layout_height="44dp"
-            android:gravity="center_vertical" android:paddingHorizontal="8dp">
-            <TextView android:id="@+id/btnFlash" style="@style/TopBtn" android:text="⚡" android:textSize="20sp" />
-            <TextView android:id="@+id/btnLive" style="@style/TopBtn" android:text="LIVE" />
-            <TextView android:id="@+id/btnAi" style="@style/TopBtn" android:text="AI" />
-            <TextView android:id="@+id/btnTone" style="@style/TopBtn" android:text="TONE" />
-            <TextView android:id="@+id/btnStab" style="@style/TopBtn" android:text="STAB" />
-            <TextView android:id="@+id/btnTimer" style="@style/TopBtn" android:text="⏱" android:textSize="20sp" />
-            <TextView android:id="@+id/btnGrid" style="@style/TopBtn" android:text="▦" android:textSize="20sp" />
-        </LinearLayout>
-        <LinearLayout
-            android:layout_width="match_parent" android:layout_height="34dp"
-            android:gravity="center_vertical" android:paddingHorizontal="8dp">
-            <TextView android:id="@+id/btnRes" style="@style/TopBtn" android:text="4:3" />
-            <TextView android:id="@+id/btnMax" style="@style/TopBtn" android:text="MAX" />
-            <TextView android:id="@+id/btnBurst" style="@style/TopBtn" android:text="HDR+" />
-            <TextView android:id="@+id/btnEsr" style="@style/TopBtn" android:text="ESR" />
-            <TextView android:id="@+id/btnSnd" style="@style/TopBtn" android:text="SUARA" />
-            <TextView android:id="@+id/btnInfo" style="@style/TopBtn" android:text="INFO" />
-        </LinearLayout>
+    <View android:layout_width="match_parent" android:layout_height="110dp"
+        android:layout_gravity="top" android:background="@drawable/scrim_top" />
 
-        <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
-            <androidx.camera.view.PreviewView
-                android:id="@+id/viewFinder"
-                android:layout_width="match_parent" android:layout_height="match_parent"
-                app:scaleType="fitCenter" />
-            <com.example.ioscamera.GridView
-                android:id="@+id/gridView"
-                android:layout_width="match_parent" android:layout_height="match_parent"
-                android:visibility="gone" />
-            <TextView android:id="@+id/txtRec" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_gravity="top|center_horizontal" android:layout_marginTop="8dp"
-                android:text="00:00" android:textColor="#FF3B30" android:textSize="16sp"
-                android:textStyle="bold" android:visibility="gone" />
-            <TextView android:id="@+id/txtCountdown" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_gravity="center" android:textColor="#FFFFFF" android:textSize="96sp"
-                android:visibility="gone" />
-            <TextView android:id="@+id/txtBusy" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_gravity="top|center_horizontal" android:layout_marginTop="40dp"
-                android:background="#99000000" android:padding="10dp"
-                android:textColor="#FFFFFF" android:textSize="13sp" android:visibility="gone" />
-            <View android:id="@+id/focusRing" android:layout_width="72dp" android:layout_height="72dp"
-                android:background="@drawable/shutter_ring" android:visibility="gone" />
-            <LinearLayout android:id="@+id/zoomBar" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_gravity="bottom|center_horizontal" android:layout_marginBottom="12dp"
-                android:orientation="horizontal" />
-        </FrameLayout>
+    <!-- bar atas: hanya yang paling sering dipakai -->
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="52dp"
+        android:layout_gravity="top" android:gravity="center_vertical"
+        android:orientation="horizontal" android:paddingHorizontal="10dp">
+        <TextView android:id="@+id/btnFlash" style="@style/TopIcon" android:text="⚡" />
+        <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+        <TextView android:id="@+id/btnRes" style="@style/Chip" android:layout_width="wrap_content"
+            android:layout_height="34dp" android:paddingHorizontal="16dp" android:text="4:3" />
+        <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+        <TextView android:id="@+id/btnTimer" style="@style/TopIcon" android:text="⏱" />
+        <TextView android:id="@+id/btnMore" style="@style/TopIcon" android:text="•••" android:textStyle="bold" />
+    </LinearLayout>
 
-        <LinearLayout
-            android:layout_width="match_parent" android:layout_height="44dp"
-            android:gravity="center" android:orientation="horizontal">
+    <TextView android:id="@+id/txtStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal" android:layout_marginTop="54dp"
+        android:textColor="#E6FFFFFF" android:textSize="11sp" android:textStyle="bold"
+        android:shadowColor="#99000000" android:shadowRadius="4" android:visibility="gone" />
+    <TextView android:id="@+id/txtRec" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal" android:layout_marginTop="78dp"
+        android:background="@drawable/rec_bg" android:paddingHorizontal="12dp" android:paddingVertical="4dp"
+        android:text="00:00" android:textColor="#FF3B30" android:textSize="15sp"
+        android:textStyle="bold" android:visibility="gone" />
+    <TextView android:id="@+id/txtCountdown" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="center" android:textColor="#FFFFFF" android:textSize="96sp"
+        android:visibility="gone" />
+    <TextView android:id="@+id/txtBusy" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal" android:layout_marginTop="110dp"
+        android:background="@drawable/rec_bg" android:paddingHorizontal="14dp" android:paddingVertical="8dp"
+        android:textColor="#FFFFFF" android:textSize="13sp" android:visibility="gone" />
+    <View android:id="@+id/focusRing" android:layout_width="72dp" android:layout_height="72dp"
+        android:background="@drawable/shutter_ring" android:visibility="gone" />
+
+    <!-- panel pengaturan -->
+    <LinearLayout android:id="@+id/panel"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="bottom" android:layout_marginBottom="226dp"
+        android:layout_marginHorizontal="10dp" android:background="@drawable/panel_bg"
+        android:clickable="true" android:orientation="vertical" android:padding="8dp"
+        android:visibility="gone">
+        <GridLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:columnCount="4">
+            <TextView android:id="@+id/btnLive" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="LIVE" />
+            <TextView android:id="@+id/btnAi" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="AI" />
+            <TextView android:id="@+id/btnTone" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="TONE" />
+            <TextView android:id="@+id/btnStab" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="STAB" />
+            <TextView android:id="@+id/btnNight" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="NIGHT" />
+            <TextView android:id="@+id/btnBurst" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="HDR+" />
+            <TextView android:id="@+id/btnEsr" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="ESR" />
+            <TextView android:id="@+id/btnMax" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="MAX" />
+            <TextView android:id="@+id/btnGrid" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="GRID" />
+            <TextView android:id="@+id/btnSnd" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="SUARA" />
+            <TextView android:id="@+id/btnInfo" style="@style/Chip" android:layout_width="0dp" android:layout_height="46dp"
+                android:layout_columnWeight="1" android:layout_margin="4dp" android:text="INFO" />
+        </GridLayout>
+    </LinearLayout>
+
+    <!-- kontrol bawah -->
+    <LinearLayout android:id="@+id/bottomBar"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="bottom" android:background="@drawable/scrim_bottom"
+        android:orientation="vertical" android:paddingBottom="10dp">
+        <LinearLayout android:id="@+id/zoomBar" android:layout_width="wrap_content" android:layout_height="52dp"
+            android:layout_gravity="center_horizontal" android:gravity="center" android:orientation="horizontal" />
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal" android:background="@drawable/pill_bg"
+            android:gravity="center" android:orientation="horizontal" android:padding="3dp">
             <TextView android:id="@+id/mVideo" style="@style/ModeBtn" android:text="VIDEO" />
+            <TextView android:id="@+id/mCinema" style="@style/ModeBtn" android:text="CINEMA" />
             <TextView android:id="@+id/mPhoto" style="@style/ModeBtn" android:text="FOTO" />
             <TextView android:id="@+id/mPortrait" style="@style/ModeBtn" android:text="POTRET" />
         </LinearLayout>
-
-        <FrameLayout android:layout_width="match_parent" android:layout_height="110dp">
-            <ImageView android:id="@+id/btnGallery" android:layout_width="52dp" android:layout_height="52dp"
-                android:layout_gravity="center_vertical|start" android:layout_marginStart="36dp"
+        <FrameLayout android:layout_width="match_parent" android:layout_height="108dp">
+            <ImageView android:id="@+id/btnGallery" android:layout_width="54dp" android:layout_height="54dp"
+                android:layout_gravity="center_vertical|start" android:layout_marginStart="38dp"
                 android:background="@drawable/thumb_bg" android:scaleType="centerCrop" />
-            <FrameLayout android:layout_width="78dp" android:layout_height="78dp" android:layout_gravity="center">
+            <FrameLayout android:layout_width="80dp" android:layout_height="80dp" android:layout_gravity="center">
                 <View android:layout_width="match_parent" android:layout_height="match_parent"
                     android:background="@drawable/shutter_ring" />
-                <View android:id="@+id/shutterInner" android:layout_width="62dp" android:layout_height="62dp"
+                <View android:id="@+id/shutterInner" android:layout_width="64dp" android:layout_height="64dp"
                     android:layout_gravity="center" android:background="@drawable/shutter_photo" />
                 <View android:id="@+id/shutterHit" android:layout_width="match_parent" android:layout_height="match_parent"
                     android:clickable="true" android:focusable="true" />
             </FrameLayout>
-            <TextView android:id="@+id/btnFlip" android:layout_width="52dp" android:layout_height="52dp"
-                android:layout_gravity="center_vertical|end" android:layout_marginEnd="36dp"
+            <TextView android:id="@+id/btnFlip" android:layout_width="54dp" android:layout_height="54dp"
+                android:layout_gravity="center_vertical|end" android:layout_marginEnd="38dp"
                 android:background="@drawable/zoom_bg" android:gravity="center"
                 android:text="⟳" android:textSize="26sp" android:textColor="#FFFFFF" />
         </FrameLayout>

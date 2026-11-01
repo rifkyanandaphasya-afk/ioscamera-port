@@ -16,8 +16,10 @@ object Enhancer {
     private const val F = 32      // ukuran sel grid kontras lokal
     private const val BH = 64     // tinggi pita proses
 
-    fun process(f: File, tone: Boolean, enhance: Boolean, strength: Float = 1f): Boolean {
-        if (!tone && !enhance) return false
+    private val nl = IntArray(256) { (255.0 * Math.pow(it / 255.0, 0.80) + 0.5).toInt().coerceIn(0, 255) }
+
+    fun process(f: File, tone: Boolean, enhance: Boolean, strength: Float = 1f, night: Boolean = false): Boolean {
+        if (!tone && !enhance && !night) return false
         val bo = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(f.path, bo)
         if (bo.outWidth <= 0 || bo.outWidth.toLong() * bo.outHeight > 60_000_000L) return false
@@ -66,6 +68,7 @@ object Enhancer {
                 for (x in 0 until w) {
                     val p = px[cur + x]
                     var q = if (tone) Tone.toneRgb((p shr 16) and 255, (p shr 8) and 255, p and 255) else p
+                    if (night) q = (0xFF shl 24) or (nl[(q shr 16) and 255] shl 16) or (nl[(q shr 8) and 255] shl 8) or nl[q and 255]
                     if (enhance && grid != null) {
                         val xl = if (x > 0) x - 1 else x
                         val xr = if (x < w - 1) x + 1 else x
@@ -73,7 +76,7 @@ object Enhancer {
                         val avg = (lum[up + xl] + lum[up + x] + lum[up + xr] + lum[cur + xl] + yc +
                             lum[cur + xr] + lum[dn + xl] + lum[dn + x] + lum[dn + xr]) / 9f
                         var d = yc - avg
-                        if (abs(d) < 3f) d *= 0.35f                     // coring: jangan pertajam noise
+                        if (abs(d) < (if (night) 7f else 3f)) d *= (if (night) 0.2f else 0.35f)                     // coring: jangan pertajam noise
                         val a = gx0[x]; val bI = gx1[x]; val t = gxt[x]
                         val top = grid[r0 + a] * (1f - t) + grid[r0 + bI] * t
                         val bot = grid[r1 + a] * (1f - t) + grid[r1 + bI] * t

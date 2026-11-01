@@ -20,15 +20,18 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Range
 import android.util.Rational
 import android.util.Size
 import android.view.Gravity
 import android.view.GestureDetector
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -55,6 +58,7 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.extensions.ExtensionMode
 import androidx.camera.extensions.ExtensionsManager
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
@@ -86,7 +90,7 @@ import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
 
-    enum class Mode { VIDEO, PHOTO, PORTRAIT }
+    enum class Mode { VIDEO, CINEMA, PHOTO, PORTRAIT }
     data class VOpt(val label: String, val q: Quality, val fps: Int, val mbps: Int)
 
     private lateinit var b: ActivityMainBinding
@@ -106,9 +110,21 @@ class MainActivity : AppCompatActivity() {
     private var live = false
     private var toneLevel = 0
     private var burstOn = false
+    private var cineFps = 24
+    private var recCinema = false
+    private val ACC = Color.parseColor("#FFD60A")
+    private val isVideo: Boolean get() = mode == Mode.VIDEO || mode == Mode.CINEMA
+    private val hideFreeze = Runnable {
+        b.freeze.animate().alpha(0f).setDuration(240).withEndAction { b.freeze.visibility = View.GONE }.start()
+    }
     private var esrLevel = 0   // 0 mati, 1 cepat (~1,5 MP), 2 tinggi (~3 MP)
     private val esr by lazy { AiUpscaler(this) }
-    private var stabOn = false
+    private var stabLevel = 0   // 0 mati, 1 OIS+EIS, 2 OIS saja, 3 EIS saja
+    private var nightOn = false
+    private var nightExt = false
+    private var nightFps: Range<Int>? = null
+    private var stabModes = "-"
+    private val steady by lazy { Steady(this) }
     private var aiOn = false
     private var maxRes = false
     private var soundOn = true
@@ -173,6 +189,9 @@ class MainActivity : AppCompatActivity() {
         permLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
     }
 
+    override fun onResume() { super.onResume(); steady.start() }
+    override fun onPause() { super.onPause(); steady.stop() }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun play(s: Int) { if (soundOn) sound.play(s) }
 
@@ -189,7 +208,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun probe(info: CameraInfo?, base: CameraSelector) {
         oisOk = false; eisOk = false; eisMode = 0; hq = emptyList()
-        fpsText = "-"; qualText = "-"; fps4k = "-"; maxFps = 30; rawText = "-"
+        fpsText = "-"; qualText = "-"; fps4k = "-"; maxFps = 30; rawText = "-"; stabModes = "-"; nightFps = null
         if (forcedCamId == null) { lensRatios = emptyList(); lensText = "-"; sepIds.clear() }
         val em = extensions
         extText = listOf("AUTO" to ExtensionMode.AUTO, "HDR" to ExtensionMode.HDR, "NIGHT" to ExtensionMode.NIGHT,
@@ -205,9 +224,11 @@ class MainActivity : AppCompatActivity() {
             eisMode = if (sm?.contains(CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true) 1
                       else if (sm?.contains(2) == true) 2 else 0   // 2 = stabilisasi pratinjau (Android 13+)
             eisOk = eisMode != 0
+            stabModes = sm?.joinToString() ?: "-"
             val ranges = c2.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             fpsText = ranges?.joinToString { "${it.lower}-${it.upper}" } ?: "-"
             ranges?.forEach { if (it.upper > maxFps) maxFps = it.upper }
+            nightFps = ranges?.filter { it.upper >= 15 }?.minByOrNull { it.lower }?.takeIf { it.lower <= 12 }
             val sq = QualitySelector.getSupportedQualities(info)
             qualText = sq.joinToString { it.toString().substringAfter("name=").substringBefore("}") }
             val prev = vOpts.getOrNull(vIdx)?.label
@@ -291,10 +312,13 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------ bind
 
     private fun <T> stabilize(ext: Camera2Interop.Extender<T>, eis: Boolean) {
-        if (!stabOn) return
-        if (oisOk) ext.setCaptureRequestOption(
+        val lvl = if (stabLevel == 0 && mode == Mode.CINEMA) 1 else stabLevel
+        if (lvl == 0) return
+        val wantOis = lvl == 1 || lvl == 2
+        val wantEis = lvl == 1 || lvl == 3
+        if (wantOis && oisOk) ext.setCaptureRequestOption(
             CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON)
-        if (eis && eisOk) ext.setCaptureRequestOption(
+        if (eis && wantEis && eisOk) ext.setCaptureRequestOption(
             CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, eisMode)
     }
 
@@ -317,6 +341,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun bind() {
         val p = provider ?: return
+        // bekukan frame terakhir supaya tidak ada layar hitam saat pindah lensa/mode
+        if (camera != null && b.freeze.visibility != View.VISIBLE) {
+            try {
+                b.viewFinder.bitmap?.let {
+                    b.freeze.setImageBitmap(it); b.freeze.alpha = 1f; b.freeze.visibility = View.VISIBLE
+                    handler.removeCallbacks(hideFreeze); handler.postDelayed(hideFreeze, 1600)
+                }
+            } catch (e: Exception) { }
+        }
         b.viewFinder.removeCallbacks(zoomTick); zooming = false; zoomBuilt = false
         p.unbindAll()
         val bb = CameraSelector.Builder().requireLensFacing(lens)
@@ -337,12 +370,16 @@ class MainActivity : AppCompatActivity() {
 
         var selector = base
         var extUsed = false
+        nightExt = false
         val em = extensions
         if (mode == Mode.PORTRAIT) {
             if (em != null && em.isExtensionAvailable(base, ExtensionMode.BOKEH)) {
                 selector = em.getExtensionEnabledCameraSelector(base, ExtensionMode.BOKEH); extUsed = true
             } else toast("Mode potret (bokeh) tidak didukung perangkat ini")
-        } else if (mode == Mode.PHOTO && aiOn && !live && !extBlocked && forcedCamId == null && !burstOn) {
+        } else if (mode == Mode.PHOTO && nightOn && !live && !extBlocked && forcedCamId == null && em != null &&
+            em.isExtensionAvailable(base, ExtensionMode.NIGHT)) {
+            selector = em.getExtensionEnabledCameraSelector(base, ExtensionMode.NIGHT); extUsed = true; nightExt = true
+        } else if (mode == Mode.PHOTO && aiOn && !live && !extBlocked && forcedCamId == null && !burstOn && !nightOn) {
             if (em != null) {
                 val m = listOf(ExtensionMode.AUTO, ExtensionMode.HDR).firstOrNull { em.isExtensionAvailable(base, it) }
                 if (m != null) { selector = em.getExtensionEnabledCameraSelector(base, m); extUsed = true }
@@ -351,39 +388,49 @@ class MainActivity : AppCompatActivity() {
         }
 
         val useLive = live && mode == Mode.PHOTO
-        val tar = if (mode == Mode.VIDEO || rIdx == 1) AspectRatio.RATIO_16_9 else AspectRatio.RATIO_4_3
-        val vr = if (mode == Mode.VIDEO) Rational(9, 16) else when (rIdx) {
+        val tar = if (isVideo || rIdx == 1) AspectRatio.RATIO_16_9 else AspectRatio.RATIO_4_3
+        val vr = if (isVideo) Rational(9, 16) else when (rIdx) {
             0 -> Rational(3, 4); 1 -> Rational(9, 16); else -> Rational(1, 1)
         }
 
         val pb = Preview.Builder().setResolutionSelector(resSel(tar, false))
-        if (!extUsed) stabilize(Camera2Interop.Extender(pb), mode == Mode.VIDEO)
+        if (!extUsed) stabilize(Camera2Interop.Extender(pb), isVideo)
+        if (!extUsed && nightOn && mode == Mode.PHOTO) nightFps?.let {
+            Camera2Interop.Extender(pb).setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
+        }
         val preview = pb.build().also { it.setSurfaceProvider(b.viewFinder.surfaceProvider) }
         val gb = UseCaseGroup.Builder().addUseCase(preview)
             .setViewPort(ViewPort.Builder(vr, b.viewFinder.display.rotation).build())
 
         imageCapture = null; videoCapture = null
-        if (mode != Mode.VIDEO) {
+        if (!isVideo) {
             val high = maxRes && !useLive && !extUsed
             val ib = ImageCapture.Builder().setResolutionSelector(resSel(tar, high)).setJpegQuality(97)
-                .setCaptureMode(if (useLive || burstOn) ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+                .setCaptureMode(if (useLive || ((burstOn || nightOn) && !nightExt)) ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
                                 else ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                 .setFlashMode(flashMode)
             if (!extUsed) {
                 applyHq(Camera2Interop.Extender(ib))
                 stabilize(Camera2Interop.Extender(ib), false)
+                if (nightOn) nightFps?.let {
+                    Camera2Interop.Extender(ib).setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
+                }
             }
             imageCapture = ib.build()
             gb.addUseCase(imageCapture!!)
         }
-        val opt = if (mode == Mode.VIDEO) vOpts[vIdx] else allVOpts[0]
-        if (mode == Mode.VIDEO || useLive) {
+        val opt = when (mode) {
+            Mode.VIDEO -> vOpts[vIdx]
+            Mode.CINEMA -> VOpt("CINE·$cineFps", if (qualText.contains("FHD")) Quality.FHD else Quality.HD, cineFps, 20)
+            else -> allVOpts[0]
+        }
+        if (isVideo || useLive) {
             val rec = Recorder.Builder()
                 .setQualitySelector(QualitySelector.from(opt.q, FallbackStrategy.lowerQualityOrHigherThan(opt.q)))
                 .setTargetVideoEncodingBitRate(opt.mbps * 1_000_000).build()
             val vb = VideoCapture.Builder(rec)
-            if (opt.fps > 30) vb.setTargetFrameRate(Range(opt.fps, opt.fps))
-            stabilize(Camera2Interop.Extender(vb), mode == Mode.VIDEO)
+            if (opt.fps != 30) vb.setTargetFrameRate(Range(opt.fps, opt.fps))
+            stabilize(Camera2Interop.Extender(vb), isVideo)
             videoCapture = vb.build()
             gb.addUseCase(videoCapture!!)
         }
@@ -396,9 +443,10 @@ class MainActivity : AppCompatActivity() {
                 toast("Lensa ini tidak bisa dibuka aplikasi, kembali ke kamera utama"); bind()
             } else if (extUsed && mode == Mode.PHOTO) {
                 extBlocked = true; toast("Ekstensi HP gagal dipakai, pakai AI software"); bind()
-            } else if (mode == Mode.VIDEO && opt.fps > 30) {
+            } else if (isVideo && opt.fps != 30) {
                 toast("${opt.label} tidak didukung kamera ini, pakai 30 fps")
-                vIdx = vOpts.indexOfFirst { it.q == opt.q && it.fps == 30 }.takeIf { it >= 0 } ?: 0
+                if (mode == Mode.CINEMA) cineFps = 30
+                else vIdx = vOpts.indexOfFirst { it.q == opt.q && it.fps == 30 }.takeIf { it >= 0 } ?: 0
                 bind()
             } else if (useLive) {
                 live = false; toast("Foto Live tidak didukung perangkat ini"); bind()
@@ -407,6 +455,16 @@ class MainActivity : AppCompatActivity() {
             } else toast("Gagal membuka kamera: ${e.message}")
             return
         }
+        try {
+            val st = camera?.cameraInfo?.exposureState
+            if (st != null && st.isExposureAdjustmentSupported) {
+                val rg = st.exposureCompensationRange
+                val step = st.exposureCompensationStep.toFloat()
+                val idx = if (nightOn && !nightExt && mode == Mode.PHOTO && step > 0f)
+                    (1.5f / step).roundToInt().coerceIn(rg.lower, rg.upper) else 0
+                camera?.cameraControl?.setExposureCompensationIndex(idx)
+            }
+        } catch (e: Exception) { }
         camera?.cameraInfo?.zoomState?.observe(this) { z ->
             if (!zooming) { zoomCur = z.zoomRatio; zoomTarget = zoomCur }
             if (!zoomBuilt) {
@@ -425,6 +483,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupUi() {
         b.mVideo.setOnClickListener { setMode(Mode.VIDEO) }
+        b.mCinema.setOnClickListener {
+            setMode(Mode.CINEMA)
+            toast("CINEMA: film 24 fps, warna sinematik, stabilisasi otomatis")
+        }
+        b.btnMore.setOnClickListener { togglePanel() }
+        b.viewFinder.previewStreamState.observe(this) { st ->
+            if (st == PreviewView.StreamState.STREAMING && b.freeze.visibility == View.VISIBLE) {
+                handler.removeCallbacks(hideFreeze); handler.postDelayed(hideFreeze, 120)
+            }
+        }
         b.mPhoto.setOnClickListener { setMode(Mode.PHOTO) }
         b.mPortrait.setOnClickListener { setMode(Mode.PORTRAIT) }
         b.btnFlip.setOnClickListener {
@@ -436,12 +504,23 @@ class MainActivity : AppCompatActivity() {
         }
         b.btnRes.setOnClickListener {
             if (recording != null) return@setOnClickListener
-            if (mode == Mode.VIDEO) vIdx = (vIdx + 1) % vOpts.size else rIdx = (rIdx + 1) % ratios.size
+            when (mode) {
+                Mode.VIDEO -> vIdx = (vIdx + 1) % vOpts.size
+                Mode.CINEMA -> cineFps = if (cineFps == 24) 30 else 24
+                else -> rIdx = (rIdx + 1) % ratios.size
+            }
             bind()
         }
         b.btnMax.setOnClickListener {
             maxRes = !maxRes; bind()
             toast(if (maxRes) "Resolusi foto MAX (lihat INFO untuk ukuran)" else "Resolusi standar")
+        }
+        b.btnNight.setOnClickListener {
+            if (mode != Mode.PHOTO) { toast("NIGHT hanya di mode Foto"); return@setOnClickListener }
+            nightOn = !nightOn; if (nightOn) live = false; bind()
+            toast(if (!nightOn) "Night mati"
+                  else if (nightExt) "NIGHT bawaan HP aktif"
+                  else "NIGHT software: 8 foto digabung. Tahan HP diam ±3 detik (tripod lebih baik)")
         }
         b.btnEsr.setOnClickListener {
             if (!esr.available()) { toast("Model ESR belum ada di app/src/main/assets"); return@setOnClickListener }
@@ -452,7 +531,7 @@ class MainActivity : AppCompatActivity() {
         }
         b.btnLive.setOnClickListener {
             if (mode != Mode.PHOTO) { toast("Foto Live hanya di mode Foto"); return@setOnClickListener }
-            live = !live; if (live) burstOn = false; bind()
+            live = !live; if (live) { burstOn = false; nightOn = false }; bind()
             toast(if (live) "Live aktif (AI bawaan HP & MAX dinonaktifkan)" else "Live mati")
         }
         b.btnAi.setOnClickListener {
@@ -471,17 +550,23 @@ class MainActivity : AppCompatActivity() {
         }
         b.btnStab.setOnClickListener {
             if (recording != null) return@setOnClickListener
-            stabOn = !stabOn; bind()
-            toast(if (!stabOn) "Stabilisasi mati"
-                  else "OIS: ${if (oisOk) "ya" else "tidak ada"}, EIS: ${if (eisOk) "ya" else "tidak ada"}")
+            stabLevel = (stabLevel + 1) % 4; bind()
+            val o = if (oisOk) "OIS ada" else "OIS tidak ada"
+            val e = if (eisOk) (if (eisMode == 2) "EIS ada (mode pratinjau)" else "EIS ada") else "EIS tidak ada"
+            toast(when (stabLevel) {
+                1 -> "OIS+EIS: $o, $e"
+                2 -> "OIS saja: $o"
+                3 -> "EIS saja: $e (bekerja di mode video)"
+                else -> "Stabilisasi mati"
+            })
         }
         b.btnSnd.setOnClickListener { soundOn = !soundOn; updateUi() }
         b.btnInfo.setOnClickListener { showInfo() }
         b.btnFlash.setOnClickListener {
-            if (mode == Mode.VIDEO) {
+            if (isVideo) {
                 torchOn = !torchOn
                 camera?.cameraControl?.enableTorch(torchOn)
-                b.btnFlash.setTextColor(if (torchOn) Color.YELLOW else Color.WHITE)
+                b.btnFlash.setTextColor(if (torchOn) ACC else Color.WHITE)
             } else {
                 flashMode = when (flashMode) {
                     ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO
@@ -489,7 +574,7 @@ class MainActivity : AppCompatActivity() {
                     else -> ImageCapture.FLASH_MODE_OFF
                 }
                 imageCapture?.flashMode = flashMode
-                b.btnFlash.setTextColor(if (flashMode == ImageCapture.FLASH_MODE_OFF) Color.WHITE else Color.YELLOW)
+                b.btnFlash.setTextColor(if (flashMode == ImageCapture.FLASH_MODE_OFF) Color.WHITE else ACC)
                 toast(when (flashMode) {
                     ImageCapture.FLASH_MODE_AUTO -> "Flash: Otomatis"
                     ImageCapture.FLASH_MODE_ON -> "Flash: Hidup"
@@ -499,13 +584,13 @@ class MainActivity : AppCompatActivity() {
         }
         b.btnTimer.setOnClickListener {
             timerSec = when (timerSec) { 0 -> 3; 3 -> 10; else -> 0 }
-            b.btnTimer.setTextColor(if (timerSec == 0) Color.WHITE else Color.YELLOW)
+            b.btnTimer.setTextColor(if (timerSec == 0) Color.WHITE else ACC)
             toast(if (timerSec == 0) "Timer mati" else "Timer $timerSec detik")
         }
         b.btnGrid.setOnClickListener {
             val show = b.gridView.visibility != View.VISIBLE
             b.gridView.visibility = if (show) View.VISIBLE else View.GONE
-            b.btnGrid.setTextColor(if (show) Color.YELLOW else Color.WHITE)
+            b.btnGrid.setTextColor(if (show) ACC else Color.WHITE)
         }
         b.btnGallery.clipToOutline = true
         b.btnGallery.setOnClickListener {
@@ -515,28 +600,66 @@ class MainActivity : AppCompatActivity() {
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
             }
         }
-        b.shutterHit.setOnClickListener { onShutter() }
+        b.shutterHit.setOnClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); onShutter()
+        }
         setupTouch()
     }
 
     private fun updateUi() {
-        val map = mapOf<Mode, TextView>(Mode.VIDEO to b.mVideo, Mode.PHOTO to b.mPhoto, Mode.PORTRAIT to b.mPortrait)
-        map.forEach { (k, v) -> v.setTextColor(if (k == mode) Color.YELLOW else Color.WHITE) }
-        b.shutterInner.setBackgroundResource(if (mode == Mode.VIDEO) R.drawable.shutter_video else R.drawable.shutter_photo)
+        val map = mapOf<Mode, TextView>(Mode.VIDEO to b.mVideo, Mode.CINEMA to b.mCinema, Mode.PHOTO to b.mPhoto, Mode.PORTRAIT to b.mPortrait)
+        map.forEach { (k, v) -> v.setTextColor(if (k == mode) ACC else Color.WHITE) }
+        b.shutterInner.setBackgroundResource(if (isVideo) R.drawable.shutter_video else R.drawable.shutter_photo)
         b.btnFlash.setTextColor(
-            if (mode != Mode.VIDEO && flashMode != ImageCapture.FLASH_MODE_OFF) Color.YELLOW else Color.WHITE)
-        b.btnRes.text = if (mode == Mode.VIDEO) vOpts[vIdx].label else ratios[rIdx]
-        b.btnLive.setTextColor(if (live && mode == Mode.PHOTO) Color.YELLOW else Color.WHITE)
+            if (!isVideo && flashMode != ImageCapture.FLASH_MODE_OFF) ACC else Color.WHITE)
+        b.btnRes.text = when (mode) {
+            Mode.VIDEO -> vOpts[vIdx].label
+            Mode.CINEMA -> "CINE·$cineFps"
+            else -> ratios[rIdx]
+        }
+        val tags = mutableListOf<String>()
+        if (mode == Mode.CINEMA) tags.add("FILM")
+        if (burstOn && mode == Mode.PHOTO) tags.add("HDR+")
+        if (nightOn && mode == Mode.PHOTO) tags.add("NIGHT")
+        if (aiOn) tags.add("AI")
+        if (toneLevel > 0) tags.add(arrayOf("", "iOS", "VIVID")[toneLevel])
+        if (stabLevel > 0) tags.add("STAB " + arrayOf("", "O+E", "OIS", "EIS")[stabLevel])
+        if (esrLevel > 0) tags.add("ESR")
+        if (live && mode == Mode.PHOTO) tags.add("LIVE")
+        if (maxRes && mode == Mode.PHOTO) tags.add("MAX")
+        b.txtStatus.text = tags.joinToString("  ·  ")
+        b.txtStatus.visibility = if (tags.isEmpty()) View.GONE else View.VISIBLE
+        // garis grid mengikuti ukuran gambar pratinjau
+        val ratio = if (isVideo) 16f / 9f else when (rIdx) { 0 -> 4f / 3f; 1 -> 16f / 9f; else -> 1f }
+        val w = if (b.root.width > 0) b.root.width else resources.displayMetrics.widthPixels
+        val lp = b.gridView.layoutParams as FrameLayout.LayoutParams
+        lp.height = (w * ratio).toInt(); lp.gravity = Gravity.TOP
+        b.gridView.layoutParams = lp
+        b.btnLive.setTextColor(if (live && mode == Mode.PHOTO) ACC else Color.WHITE)
         b.btnLive.alpha = if (mode == Mode.PHOTO) 1f else 0.4f
-        b.btnAi.setTextColor(if (aiOn) Color.YELLOW else Color.WHITE)
+        b.btnAi.setTextColor(if (aiOn) ACC else Color.WHITE)
         b.btnTone.text = arrayOf("TONE", "iOS", "VIVID")[toneLevel]
-        b.btnTone.setTextColor(if (toneLevel > 0) Color.YELLOW else Color.WHITE)
-        b.btnBurst.setTextColor(if (burstOn) Color.YELLOW else Color.WHITE)
+        b.btnTone.setTextColor(if (toneLevel > 0) ACC else Color.WHITE)
+        b.btnBurst.setTextColor(if (burstOn) ACC else Color.WHITE)
         b.btnEsr.text = arrayOf("ESR", "ESR-C", "ESR-T")[esrLevel]
-        b.btnEsr.setTextColor(if (esrLevel > 0) Color.YELLOW else Color.WHITE)
-        b.btnStab.setTextColor(if (stabOn) Color.YELLOW else Color.WHITE)
-        b.btnMax.setTextColor(if (maxRes) Color.YELLOW else Color.WHITE)
-        b.btnSnd.setTextColor(if (soundOn) Color.YELLOW else Color.WHITE)
+        b.btnEsr.setTextColor(if (esrLevel > 0) ACC else Color.WHITE)
+        b.btnStab.text = arrayOf("STAB", "O+E", "OIS", "EIS")[stabLevel]
+        b.btnStab.setTextColor(if (stabLevel > 0) ACC else Color.WHITE)
+        b.btnNight.setTextColor(if (nightOn) ACC else Color.WHITE)
+        b.btnMax.setTextColor(if (maxRes) ACC else Color.WHITE)
+        b.btnSnd.setTextColor(if (soundOn) ACC else Color.WHITE)
+    }
+
+    private fun togglePanel(show: Boolean? = null) {
+        val s = show ?: (b.panel.visibility != View.VISIBLE)
+        b.btnMore.setTextColor(if (s) ACC else Color.WHITE)
+        if (s) {
+            b.panel.visibility = View.VISIBLE; b.panel.alpha = 0f; b.panel.translationY = dp(24).toFloat()
+            b.panel.animate().alpha(1f).translationY(0f).setDuration(180).start()
+        } else {
+            b.panel.animate().alpha(0f).translationY(dp(24).toFloat()).setDuration(150)
+                .withEndAction { b.panel.visibility = View.GONE }.start()
+        }
     }
 
     private fun setMode(m: Mode) { if (recording != null) return; mode = m; bind() }
@@ -559,8 +682,11 @@ class MainActivity : AppCompatActivity() {
         if (maxFps < 60) sb.append("60 fps: tidak dibuka HP untuk aplikasi pihak ketiga\n")
         if (sepIds.isNotEmpty()) sb.append("Lensa ber-ID terpisah: ").append(sepIds.entries.joinToString { "${fmt(it.key)}x=ID${it.value}" }).append('\n')
         sb.append("Kualitas video: ").append(qualText).append('\n')
-        sb.append("OIS: ").append(if (oisOk) "ya" else "tidak")
-            .append("   EIS: ").append(if (eisOk) "ya" else "tidak").append('\n')
+        sb.append("OIS: ").append(if (oisOk) "ya" else "tidak").append('\n')
+        sb.append("EIS: ").append(if (eisOk) (if (eisMode == 2) "ya (mode pratinjau)" else "ya") else "tidak")
+            .append("  [mode HP: ").append(stabModes).append("]\n")
+        sb.append("Giroskop (steady shot): ").append(if (steady.available) "ada" else "tidak ada").append('\n')
+        sb.append("Night: ").append(if (extText.contains("NIGHT")) "bawaan HP (NIGHT)" else "software multi-frame").append('\n')
         sb.append("Mode HQ hardware: ").append(hq.size).append(" aktif\n")
         sb.append("Model ESR: ").append(if (esr.available()) "ada" else "belum ada").append('\n')
         sb.append("RAW (DNG): ").append(rawText).append('\n')
@@ -619,7 +745,7 @@ class MainActivity : AppCompatActivity() {
         zoomBtns.forEachIndexed { i, (r, _) -> if (r <= cur * 1.03f) active = i }
         zoomBtns.forEachIndexed { i, (r, tv) ->
             tv.text = if (i == active) fmt(cur) + "x" else fmt(r)
-            tv.setTextColor(if (i == active) Color.YELLOW else Color.WHITE)
+            tv.setTextColor(if (i == active) ACC else Color.WHITE)
         }
     }
 
@@ -645,7 +771,10 @@ class MainActivity : AppCompatActivity() {
             override fun onScale(d: ScaleGestureDetector): Boolean { zoomTo(zoomTarget * d.scaleFactor); return true }
         })
         val tap = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onSingleTapUp(e: MotionEvent): Boolean { focusAt(e.x, e.y); return true }
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                if (b.panel.visibility == View.VISIBLE) togglePanel(false)
+                focusAt(e.x, e.y); return true
+            }
         })
         b.viewFinder.setOnTouchListener { v, e ->
             scale.onTouchEvent(e); tap.onTouchEvent(e)
@@ -670,7 +799,7 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------ foto
 
     private fun onShutter() {
-        if (mode == Mode.VIDEO) { toggleRecording(); return }
+        if (isVideo) { toggleRecording(); return }
         if (timerSec == 0) takePhoto() else countdown(timerSec)
     }
 
@@ -683,13 +812,29 @@ class MainActivity : AppCompatActivity() {
 
     private fun stamp() = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())
 
+    /** Steady shot: tunggu giroskop tenang (maks [maxMs]) sebelum memotret. */
+    private fun whenSteady(maxMs: Long, then: () -> Unit) {
+        if (stabLevel == 0 || !steady.available) { then(); return }
+        val t0 = SystemClock.elapsedRealtime()
+        var calmSince = -1L
+        val r = object : Runnable {
+            override fun run() {
+                val now = SystemClock.elapsedRealtime()
+                if (steady.motion < 0.12f) { if (calmSince < 0) calmSince = now } else calmSince = -1L
+                if ((calmSince >= 0 && now - calmSince >= 100) || now - t0 >= maxMs) then()
+                else handler.postDelayed(this, 25)
+            }
+        }
+        r.run()
+    }
+
     private fun takePhoto() {
         val ic = imageCapture ?: return
         val photo = File(cacheDir, "p_${stamp()}.jpg")
         val zShot = zoomCur * camFactor
         val vc = videoCapture
         val withClip = live && mode == Mode.PHOTO && vc != null
-        if (burstOn && mode == Mode.PHOTO && !withClip) { takeBurst(); return }
+        if ((burstOn || nightOn) && !nightExt && mode == Mode.PHOTO && !withClip) { takeBurst(); return }
         var clip: File? = null
         var parts = if (withClip) 2 else 1
         fun done() { if (--parts == 0) finishPhoto(photo, clip, zShot) }
@@ -707,14 +852,14 @@ class MainActivity : AppCompatActivity() {
         }
         b.viewFinder.alpha = 0.2f; b.viewFinder.animate().alpha(1f).setDuration(150)
         handler.postDelayed({
-            ic.takePicture(ImageCapture.OutputFileOptions.Builder(photo).build(),
+            whenSteady(if (withClip) 0L else 700L) { ic.takePicture(ImageCapture.OutputFileOptions.Builder(photo).build(),
                 ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(r: ImageCapture.OutputFileResults) { done() }
                     override fun onError(e: ImageCaptureException) {
                         toast("Gagal mengambil foto: ${e.message}")
                         liveRec?.stop(); liveRec = null
                     }
-                })
+                }) }
         }, if (withClip) 250L else 0L)
     }
 
@@ -791,7 +936,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun takeBurst() {
         val ic = imageCapture ?: return
-        val n = 6
+        val n = if (nightOn) 8 else 6
         val zShot = zoomCur * camFactor
         val files = ArrayList<File>()
         play(MediaActionSound.SHUTTER_CLICK)
@@ -799,7 +944,7 @@ class MainActivity : AppCompatActivity() {
         fun next() {
             if (files.size >= n) { finishBurst(files, zShot); return }
             val f = File(cacheDir, "b_${stamp()}_${files.size}.jpg")
-            ic.takePicture(ImageCapture.OutputFileOptions.Builder(f).build(),
+            whenSteady(if (nightOn) 500L else 350L) { ic.takePicture(ImageCapture.OutputFileOptions.Builder(f).build(),
                 ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                         files.add(f); busy("Tahan HP diam…  ${files.size}/$n"); next()
@@ -808,14 +953,14 @@ class MainActivity : AppCompatActivity() {
                         toast("Burst terhenti: ${e.message}")
                         if (files.size >= 2) finishBurst(files, zShot) else busy(null)
                     }
-                })
+                }) }
         }
         next()
     }
 
     private fun finishBurst(files: List<File>, zShot: Float) {
         pendingJobs++; busy("Menggabungkan foto…")
-        val lvl = toneLevel; val esrL = esrLevel
+        val lvl = toneLevel; val esrL = esrLevel; val night = nightOn
         exec.execute {
             var dims = ""
             try {
@@ -826,7 +971,7 @@ class MainActivity : AppCompatActivity() {
                 BitmapFactory.decodeFile(src.path, bo)
                 dims = "${bo.outWidth}x${bo.outHeight}" + if (ok) " (HDR+ ${files.size} frame)" else " (gabung gagal)"
                 Tone.level = lvl
-                try { Enhancer.process(src, lvl > 0, true, if (ok) 1.6f else 1f) } catch (t: Throwable) { }
+                try { Enhancer.process(src, lvl > 0, true, if (ok) 1.6f else 1f, night) } catch (t: Throwable) { }
                 if (esrL > 0) try { applyEsr(src, zShot, esrL) } catch (t: Throwable) { }
                 val uri = saveToGallery(src, "IMG_${stamp()}.jpg", "image/jpeg", "Pictures/IOSCamera", false)
                 files.forEach { it.delete() }; merged.delete()
@@ -889,6 +1034,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRecording() {
         val vc = videoCapture ?: return
+        recCinema = mode == Mode.CINEMA
         val f = File(cacheDir, "v_${stamp()}.mp4")
         var pr = vc.output.prepareRecording(this, FileOutputOptions.Builder(f).build())
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
@@ -916,8 +1062,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun afterVideo(f: File) {
-        if (toneLevel == 0) { saveVideo(f, null); return }
-        Tone.level = toneLevel
+        val lv = if (recCinema) 3 else toneLevel
+        if (lv == 0) { saveVideo(f, null); return }
+        Tone.level = lv
         busy("Menerapkan tone iPhone…\n(video 4K bisa lama)")
         try {
             val out = File(cacheDir, "g_${stamp()}.mp4")

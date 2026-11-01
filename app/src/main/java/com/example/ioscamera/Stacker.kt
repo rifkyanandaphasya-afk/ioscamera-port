@@ -29,6 +29,21 @@ object Stacker {
         return s
     }
 
+    private fun sharp(s: Small): Long {
+        var acc = 0L
+        var y = 2
+        while (y < s.h - 2) {
+            var x = 2
+            while (x < s.w - 2) {
+                val c = s.y[y * s.w + x]
+                acc += abs(4 * c - s.y[y * s.w + x - 1] - s.y[y * s.w + x + 1] - s.y[(y - 1) * s.w + x] - s.y[(y + 1) * s.w + x])
+                x += 2
+            }
+            y += 2
+        }
+        return acc
+    }
+
     private fun coarse(ref: Small, f: Small, r: Int): IntArray {
         var best = Long.MAX_VALUE; var bx = 0; var by = 0
         val m = r + 2
@@ -105,15 +120,21 @@ object Stacker {
         val w = bo.outWidth; val h = bo.outHeight
         if (w < 200 || h < 200 || w.toLong() * h > 30_000_000L) return false
 
+        // frame paling tajam jadi acuan (stabilisasi software: frame goyang tidak jadi acuan)
+        val smalls = files.map { small(it) }
+        val order = files.indices.filter { smalls[it] != null }.sortedByDescending { sharp(smalls[it]!!) }
+        if (order.size < 2) return false
+        val fl = order.map { files[it] }
+        val sm = order.map { smalls[it]!! }
         val decs = ArrayList<BitmapRegionDecoder>()
         try {
-            for (f in files) decs.add(BitmapRegionDecoder.newInstance(f.path, false)!!)
-            val ref = small(files[0]) ?: return false
+            for (f in fl) decs.add(BitmapRegionDecoder.newInstance(f.path, false)!!)
+            val ref = sm[0]
             val shifts = ArrayList<IntArray?>()
             shifts.add(intArrayOf(0, 0))
-            for (i in 1 until files.size) {
-                val s = small(files[i])
-                if (s == null || s.w != ref.w || s.h != ref.h) { shifts.add(null); continue }
+            for (i in 1 until fl.size) {
+                val s = sm[i]
+                if (s.w != ref.w || s.h != ref.h) { shifts.add(null); continue }
                 val c = coarse(ref, s, 10)
                 shifts.add(refine(decs[0], decs[i], w, h, c[0] * 4, c[1] * 4))
             }
@@ -125,7 +146,7 @@ object Stacker {
                 val y1 = min(h, y0 + BAND); val rows = y1 - y0
                 val refPx = band(decs[0], w, h, y0, y1, 0, 0) ?: return false
                 val others = ArrayList<IntArray>()
-                for (i in 1 until files.size) {
+                for (i in 1 until fl.size) {
                     val s = shifts[i] ?: continue
                     band(decs[i], w, h, y0, y1, s[0], s[1])?.let { others.add(it) }
                 }
@@ -149,7 +170,7 @@ object Stacker {
             }
             out.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 97, it) }
             bmp.recycle()
-            Enhancer.copyExif(files[0], out)
+            Enhancer.copyExif(fl[0], out)
             return true
         } finally {
             for (d in decs) try { d.recycle() } catch (e: Exception) { }
